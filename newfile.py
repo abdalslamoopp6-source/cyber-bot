@@ -216,6 +216,81 @@ async def admin_send_message(
 
 
 # =========================
+# أمر شحن الكوينز للمستخدمين من المالك
+# =========================
+
+
+async def charge_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  user = update.effective_user
+  if not user.username or user.username.lower() != TARGET_USER.replace(
+      '@', ''
+  ).lower():
+    return
+
+  args = context.args
+  if len(args) < 2:
+    await update.message.reply_text(
+        '⚠️ **طريقة الاستخدام الصحيحة للشحن:**\n'
+        '`/charge <آيدي_المستخدم> <عدد_الكوينز>`\n\n'
+        'مثال:\n'
+        '`/charge 123456789 50`',
+        parse_mode='Markdown',
+    )
+    return
+
+  target_id = args[0]
+  try:
+    amount = int(args[1])
+  except ValueError:
+    await update.message.reply_text(
+        '❌ خطأ: يجب أن يكون عدد الكوينز رقماً صحيحاً.'
+    )
+    return
+
+  conn = sqlite3.connect('users.db')
+  cursor = conn.cursor()
+  cursor.execute('SELECT coins FROM users WHERE user_id = ?', (target_id,))
+  row = cursor.fetchone()
+
+  if row:
+    current_coins = row[0]
+    new_coins = current_coins + amount
+    cursor.execute(
+        'UPDATE users SET coins = ? WHERE user_id = ?', (new_coins, target_id)
+    )
+    conn.commit()
+    conn.close()
+
+    try:
+      await context.bot.send_message(
+          chat_id=int(target_id),
+          text=(
+              '🎉 **تم شحن حسابك بنجاح!**\n\n'
+              f'💰 الإضافة: `+{amount} كوينز`\n'
+              f'💳 رصيدك الحالي: `{new_coins} كوينز`\n\n'
+              '⚡ *يمكنك الآن طلب الخدمات من القائمة الرئيسية.*'
+          ),
+          parse_mode='Markdown',
+      )
+    except Exception:
+      pass
+
+    await update.message.reply_text(
+        f'✅ **تم الشحن بنجاح!**\n'
+        f'🆔 الآيدي: `{target_id}`\n'
+        f'➕ المضاف: `{amount}`\n'
+        f'💰 الإجمالي الجديد: `{new_coins} كوينز`',
+        parse_mode='Markdown',
+    )
+  else:
+    conn.close()
+    await update.message.reply_text(
+        '❌ لم يتم العثور على هذا المستخدم في قاعدة البيانات (يجب أن يكون قد ضغط'
+        ' /start في البوت مسبقاً).'
+    )
+
+
+# =========================
 # التعامل مع الأزرار
 # =========================
 
@@ -637,8 +712,9 @@ def main():
       .build()
   )
 
-  # إضافة أمر الإرسال المباشر للمالك
+  # إضافة الأوامر الخاصة بالمشرف
   app.add_handler(CommandHandler('send', admin_send_message))
+  app.add_handler(CommandHandler('charge', charge_user))
 
   conv_handler = ConversationHandler(
       entry_points=[
