@@ -216,7 +216,7 @@ async def admin_send_message(
 
 
 # =========================
-# أمر شحن الكوينز للمستخدمين من المالك
+# أمر شحن الكوينز للمستخدمين من المالك (محدث)
 # =========================
 
 
@@ -238,12 +238,12 @@ async def charge_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return
 
-  target_id = args[0]
   try:
-    amount = int(args[1])
+    target_id = int(args[0])  # تحويل الآيدي إلى رقم صحيح
+    amount = int(args[1])  # تحويل الكوينز إلى رقم صحيح
   except ValueError:
     await update.message.reply_text(
-        '❌ خطأ: يجب أن يكون عدد الكوينز رقماً صحيحاً.'
+        '❌ خطأ: الآيدي أو عدد الكوينز يجب أن يكون أرقاماً صحيحة.'
     )
     return
 
@@ -263,7 +263,7 @@ async def charge_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
       await context.bot.send_message(
-          chat_id=int(target_id),
+          chat_id=target_id,
           text=(
               '🎉 **تم شحن حسابك بنجاح!**\n\n'
               f'💰 الإضافة: `+{amount} كوينز`\n'
