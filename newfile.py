@@ -42,9 +42,6 @@ TOKEN = '8506228695:AAE3Sy2VXlbgPijeWgF-YmdVpDOakvHpCfM'
 TARGET_USER = '@BoTmz66'  # يوزر حسابك للمسؤول
 IMAGE_URL = 'https://cdn.phototourl.com/member/2026-09-23-f246863f-e6e8-440d-844d-03cd92960e4d.jpg'
 
-# تخزين الطلبات المعلقة للإدارة
-pending_admin_requests = {}
-
 # حالات المحادثة
 WAITING_FOR_PLATFORM_CHOICE = 2
 WAITING_FOR_TARGET_INPUT = 3
@@ -69,6 +66,14 @@ def init_db():
             joined_at TEXT
         )
     """)
+  cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pending_requests (
+            user_id INTEGER PRIMARY KEY,
+            service_name TEXT,
+            target_input TEXT,
+            price INTEGER DEFAULT 0
+        )
+    """)
   conn.commit()
   conn.close()
 
@@ -84,7 +89,6 @@ async def send_main_menu(
   user = update.effective_user
   init_db()
 
-  # تسجيل المستخدم أو جلب بياناته
   conn = sqlite3.connect('users.db')
   cursor = conn.cursor()
   cursor.execute(
@@ -108,7 +112,6 @@ async def send_main_menu(
     user_coins = row[1]
   conn.close()
 
-  # رسالة الترحيب مع عرض الرصيد الحالي
   welcome_text = (
       '🤖 **أهلاً بك في بوت الفيروس**\n'
       'هذا بوت خاص بالهكر، اختر الخدمة وتصفح فقط.\n\n'
@@ -173,7 +176,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# أمر شحن الكوينز للمستخدمين من المالك
+# أمر شحن الكوينز
 # =========================
 
 
@@ -187,11 +190,7 @@ async def charge_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
   args = context.args
   if len(args) < 2:
     await update.message.reply_text(
-        '⚠️ **طريقة الاستخدام الصحيحة للشحن:**\n'
-        '`/charge <آيدي_المستخدم> <عدد_الكوينز>`\n\n'
-        'مثال:\n'
-        '`/charge 123456789 50`',
-        parse_mode='Markdown',
+        '⚠️ **طريقة الاستخدام:**\n`/charge <آيدي> <العدد>`', parse_mode='Markdown'
     )
     return
 
@@ -199,9 +198,7 @@ async def charge_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_id = int(args[0])
     amount = int(args[1])
   except ValueError:
-    await update.message.reply_text(
-        '❌ خطأ: الآيدي أو عدد الكوينز يجب أن يكون أرقاماً صحيحة.'
-    )
+    await update.message.reply_text('❌ الآيدي والعدد يجب أن يكونا أرقاماً.')
     return
 
   conn = sqlite3.connect('users.db')
@@ -210,8 +207,7 @@ async def charge_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
   row = cursor.fetchone()
 
   if row:
-    current_coins = row[0]
-    new_coins = current_coins + amount
+    new_coins = row[0] + amount
     cursor.execute(
         'UPDATE users SET coins = ? WHERE user_id = ?', (new_coins, target_id)
     )
@@ -224,8 +220,7 @@ async def charge_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
           text=(
               '🎉 **تم شحن حسابك بنجاح!**\n\n'
               f'💰 الإضافة: `+{amount} كوينز`\n'
-              f'💳 رصيدك الحالي: `{new_coins} كوينز`\n\n'
-              '⚡ *يمكنك الآن طلب الخدمات من القائمة الرئيسية.*'
+              f'💳 رصيدك الحالي: `{new_coins} كوينز`'
           ),
           parse_mode='Markdown',
       )
@@ -233,22 +228,17 @@ async def charge_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
       pass
 
     await update.message.reply_text(
-        f'✅ **تم الشحن بنجاح!**\n'
-        f'🆔 الآيدي: `{target_id}`\n'
-        f'➕ المضاف: `{amount}`\n'
-        f'💰 الإجمالي الجديد: `{new_coins} كوينز`',
+        f'✅ تم شحن `{target_id}` بـ `{amount}` كوينز بنجاح! الإجمالي:'
+        f' `{new_coins}`',
         parse_mode='Markdown',
     )
   else:
     conn.close()
-    await update.message.reply_text(
-        '❌ لم يتم العثور على هذا المستخدم في قاعدة البيانات (يجب أن يكون قد ضغط'
-        ' /start في البوت مسبقاً).'
-    )
+    await update.message.reply_text('❌ المستخدم غير موجود في قاعدة البيانات.')
 
 
 # =========================
-# أمر رد المالك وتحديد السعر للمستخدم
+# أمر رد المالك وتحديد السعر
 # =========================
 
 
@@ -276,20 +266,31 @@ async def admin_set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return
 
-  req_data = pending_admin_requests.get(target_user_id)
-  if not req_data:
+  conn = sqlite3.connect('users.db')
+  cursor = conn.cursor()
+  cursor.execute(
+      'SELECT service_name, target_input FROM pending_requests WHERE user_id ='
+      ' ?',
+      (target_user_id,),
+  )
+  row = cursor.fetchone()
+
+  if not row:
+    conn.close()
     await update.message.reply_text(
         '❌ لا يوجد طلب معلق لهذا المستخدم أو أن الطلب انتهى.'
     )
     return
 
-  s_name = req_data['s_name']
-  target_input = req_data['target_input']
+  s_name, target_input = row
 
-  # تخزين السعر في الطلب المعلق للتحقق منه عند التأكيد
-  pending_admin_requests[target_user_id]['price'] = price
+  cursor.execute(
+      'UPDATE pending_requests SET price = ? WHERE user_id = ?',
+      (price, target_user_id),
+  )
+  conn.commit()
+  conn.close()
 
-  # أزرار التأكيد أو الرفض للعميل
   user_keyboard = [
       [
           InlineKeyboardButton(
@@ -327,10 +328,8 @@ async def admin_set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
   query = update.callback_query
   await query.answer()
-
   user = update.effective_user
 
-  # معالجة تأكيد الطلب من قبل العميل
   if query.data.startswith('order_confirm_'):
     parts = query.data.split('_')
     target_user_id = int(parts[2])
@@ -363,15 +362,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
       return
 
-    # خصم الكوينز من رصيد المستخدم
     new_coins = user_coins - price
     cursor.execute(
         'UPDATE users SET coins = ? WHERE user_id = ?', (new_coins, user.id)
     )
+    cursor.execute('DELETE FROM pending_requests WHERE user_id = ?', (user.id,))
     conn.commit()
     conn.close()
 
-    # تعديل الرسالة وإرسال تفاصيل الاختراق والصورة
     await query.message.edit_text(
         text=query.message.text
         + '\n\n✅ **تم تأكيد الطلب وخصم الكوينز بنجاح!**',
@@ -403,7 +401,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown',
     )
-    pending_admin_requests.pop(user.id, None)
     return
 
   elif query.data.startswith('order_reject_'):
@@ -412,11 +409,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
       await query.answer('هذا الزر ليس مخصصاً لك!', show_alert=True)
       return
 
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM pending_requests WHERE user_id = ?', (user.id,))
+    conn.commit()
+    conn.close()
+
     await query.message.edit_text(
         text=query.message.text + '\n\n❌ **تم رفض الطلب وإلغاؤه.**',
         parse_mode='Markdown',
     )
-    pending_admin_requests.pop(user.id, None)
     return
 
   if query.data == 'verify' or query.data == 'main_menu':
@@ -579,9 +581,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receive_account_followers(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
-  followers_text = update.message.text.strip()
-  context.user_data['account_followers'] = followers_text
-
+  context.user_data['account_followers'] = update.message.text.strip()
   await update.message.reply_text(
       '🟢 **ارسل اليوزر المراد استرجاعه:**', parse_mode='Markdown'
   )
@@ -598,17 +598,23 @@ async def receive_account_username(
 
   if ' ' in username_input or len(username_input) < 2:
     await update.message.reply_text(
-        '❌ **اسم اليوزر غير صحيح!**\n'
-        'يجب أن يكون يوزراً صحيحاً وخالياً من المسافات.\n'
-        '🔴 **يرجى إرسال اليوزر الصحيح:**',
+        '❌ **اسم اليوزر غير صحيح!**\n🔴 **يرجى إرسال اليوزر الصحيح:**',
         parse_mode='Markdown',
     )
     return WAITING_FOR_ACCOUNT_USERNAME
 
-  pending_admin_requests[user.id] = {
-      's_name': s_name,
-      'target_input': f'يوزر: {username_input} (المتابعين: {followers_count})',
-  }
+  target_input_str = f'يوزر: {username_input} (المتابعين: {followers_count})'
+
+  # حفظ الطلب في قاعدة البيانات بدلاً من الذاكرة المؤقتة
+  conn = sqlite3.connect('users.db')
+  cursor = conn.cursor()
+  cursor.execute(
+      'INSERT OR REPLACE INTO pending_requests (user_id, service_name,'
+      ' target_input) VALUES (?, ?, ?)',
+      (user.id, s_name, target_input_str),
+  )
+  conn.commit()
+  conn.close()
 
   user_msg = (
       '✅ **تم إرسال الرقم للمالك.**\n\n'
@@ -703,44 +709,41 @@ async def receive_target_data(
   user = update.effective_user
   s_name = context.user_data.get('pending_service', 'خدمة')
 
-  # التحقق من الإيميل
   if s_name == 'هكر إيميل':
     if '@' not in user_input or '.' not in user_input or len(user_input) < 6:
       await update.message.reply_text(
-          '❌ **البريد الإلكتروني غير صحيح!**\n'
-          'تم رفض الإدخال لعدم مطابقة الشروط.\n'
-          '🔴 **يرجى إرسال إيميل صحيح يحتوي على (@) والنطاق (مثل: example@gmail.com):**',
+          '❌ **البريد الإلكتروني غير صحيح!**\n🔴 **يرجى إرسال إيميل صحيح:**',
           parse_mode='Markdown',
       )
       return WAITING_FOR_TARGET_INPUT
 
-  # التحقق من يوزرات منصات التواصل
   elif 'اختراق' in s_name:
     if ' ' in user_input or len(user_input) < 2:
       await update.message.reply_text(
-          '❌ **اسم اليوزر أو الحساب غير صحيح!**\n'
-          'يجب أن يكون اسم المستخدم صحيحاً وخالياً من المسافات.\n'
-          '🔴 **يرجى إرسال يوزر صحيح:**',
+          '❌ **اسم اليوزر غير صحيح!**\n🔴 **يرجى إرسال يوزر صحيح:**',
           parse_mode='Markdown',
       )
       return WAITING_FOR_TARGET_INPUT
 
-  # التحقق من أرقام الهواتف
   elif 'واتساب' in s_name or 'رقم' in s_name:
     digits_only = re.sub(r'\D', '', user_input)
     if len(digits_only) < 7:
       await update.message.reply_text(
-          '❌ **رقم الهاتف غير صحيح!**\n'
-          'الرجاء التأكد من إدخال رقم صحيح يحتوي على أرقام كافية.\n'
-          '🟢 **يرجى إعادة إرسال الرقم بشكل صحيح:**',
+          '❌ **رقم الهاتف غير صحيح!**\n🟢 **يرجى إرسال الرقم بشكل صحيح:**',
           parse_mode='Markdown',
       )
       return WAITING_FOR_TARGET_INPUT
 
-  pending_admin_requests[user.id] = {
-      's_name': s_name,
-      'target_input': user_input,
-  }
+  # حفظ الطلب في قاعدة البيانات بدلاً من الذاكرة المؤقتة
+  conn = sqlite3.connect('users.db')
+  cursor = conn.cursor()
+  cursor.execute(
+      'INSERT OR REPLACE INTO pending_requests (user_id, service_name,'
+      ' target_input) VALUES (?, ?, ?)',
+      (user.id, s_name, user_input),
+  )
+  conn.commit()
+  conn.close()
 
   user_msg = (
       '✅ **تم إرسال الرقم للمالك.**\n\n'
@@ -806,7 +809,6 @@ def main():
       .build()
   )
 
-  # إضافة الأوامر الخاصة بالمشرف
   app.add_handler(CommandHandler('charge', charge_user))
   app.add_handler(CommandHandler('price', admin_set_price))
 
@@ -843,7 +845,7 @@ def main():
 
   app.add_handler(conv_handler)
 
-  print('🤖 البوت يعمل بكامل التعديلات المطلوبة...')
+  print('🤖 البوت يعمل بكامل التعديلات والربط بقاعدة البيانات...')
   app.run_polling()
 
 
