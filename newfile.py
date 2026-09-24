@@ -35,12 +35,15 @@ def run_http():
 threading.Thread(target=run_http).start()
 
 # =========================
-# إعدادات البوت
+# إعدادات البوت والخدمات
 # =========================
 
 TOKEN = '8506228695:AAE3Sy2VXlbgPijeWgF-YmdVpDOakvHpCfM'
 TARGET_USER = '@BoTmz66'  # يوزر حسابك للمسؤول
 IMAGE_URL = 'https://cdn.phototourl.com/member/2026-09-23-f246863f-e6e8-440d-844d-03cd92960e4d.jpg'
+
+# تخزين الطلبات المعلقة للإدارة
+pending_admin_requests = {}
 
 # حالات المحادثة
 WAITING_FOR_PLATFORM_CHOICE = 2
@@ -105,10 +108,11 @@ async def send_main_menu(
     user_coins = row[1]
   conn.close()
 
-  # رسالة الترحيب المطلوبة
+  # رسالة الترحيب مع عرض الرصيد الحالي
   welcome_text = (
       '🤖 **أهلاً بك في بوت الفيروس**\n'
       'هذا بوت خاص بالهكر، اختر الخدمة وتصفح فقط.\n\n'
+      f'💳 **رصيدك الحالي:** `{user_coins} كوينز`\n\n'
       '⚡ **اختر الخدمة المطلوبة:**'
   )
 
@@ -169,54 +173,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# أمر إرسال رسالة خاصة للمستخدم من المالك
-# =========================
-
-
-async def admin_send_message(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-):
-  user = update.effective_user
-  if not user.username or user.username.lower() != TARGET_USER.replace(
-      '@', ''
-  ).lower():
-    return
-
-  args = context.args
-  if len(args) < 2:
-    await update.message.reply_text(
-        '⚠️ **طريقة الاستخدام الصحيحة للإرسال لمستخدم:**\n'
-        '`/send <آيدي_المستخدم> <الرسالة>`\n\n'
-        'مثال:\n'
-        '`/send 123456789 تم فحص طلبك بنجاح`',
-        parse_mode='Markdown',
-    )
-    return
-
-  target_chat_id = args[0]
-  message_text = ' '.join(args[1:])
-
-  try:
-    await context.bot.send_message(
-        chat_id=int(target_chat_id),
-        text=(
-            '💬 **رسالة من إدارة البوت:**\n\n'
-            f'{message_text}\n\n'
-            '💳 *للشحن أو التواصل استخدم الأزرار في القائمة الرئيسية.*'
-        ),
-        parse_mode='Markdown',
-    )
-    await update.message.reply_text(
-        '✅ تم إرسال الرسالة إلى المستخدم بنجاح!'
-    )
-  except Exception as e:
-    await update.message.reply_text(
-        f'❌ فشل إرسال الرسالة للمستخدم. تأكد من صحة الآيدي. الخطأ: {e}'
-    )
-
-
-# =========================
-# أمر شحن الكوينز للمستخدمين من المالك (محدث)
+# أمر شحن الكوينز للمستخدمين من المالك
 # =========================
 
 
@@ -239,8 +196,8 @@ async def charge_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return
 
   try:
-    target_id = int(args[0])  # تحويل الآيدي إلى رقم صحيح
-    amount = int(args[1])  # تحويل الكوينز إلى رقم صحيح
+    target_id = int(args[0])
+    amount = int(args[1])
   except ValueError:
     await update.message.reply_text(
         '❌ خطأ: الآيدي أو عدد الكوينز يجب أن يكون أرقاماً صحيحة.'
@@ -291,6 +248,78 @@ async def charge_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
+# أمر رد المالك وتحديد السعر للمستخدم
+# =========================
+
+
+async def admin_set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  user = update.effective_user
+  if not user.username or user.username.lower() != TARGET_USER.replace(
+      '@', ''
+  ).lower():
+    return
+
+  args = context.args
+  if len(args) < 2:
+    await update.message.reply_text(
+        '⚠️ **طريقة الاستخدام:**\n`/price <آيدي_المستخدم> <السعر>`',
+        parse_mode='Markdown',
+    )
+    return
+
+  try:
+    target_user_id = int(args[0])
+    price = int(args[1])
+  except ValueError:
+    await update.message.reply_text(
+        '❌ الآيدي والسعر يجب أن يكونا أرقاماً صحيحة.'
+    )
+    return
+
+  req_data = pending_admin_requests.get(target_user_id)
+  if not req_data:
+    await update.message.reply_text(
+        '❌ لا يوجد طلب معلق لهذا المستخدم أو أن الطلب انتهى.'
+    )
+    return
+
+  s_name = req_data['s_name']
+  target_input = req_data['target_input']
+
+  # تخزين السعر في الطلب المعلق للتحقق منه عند التأكيد
+  pending_admin_requests[target_user_id]['price'] = price
+
+  # أزرار التأكيد أو الرفض للعميل
+  user_keyboard = [
+      [
+          InlineKeyboardButton(
+              '✅ تأكيد', callback_data=f'order_confirm_{target_user_id}_{price}'
+          ),
+          InlineKeyboardButton(
+              '❌ رفض', callback_data=f'order_reject_{target_user_id}'
+          ),
+      ]
+  ]
+
+  try:
+    await context.bot.send_message(
+        chat_id=target_user_id,
+        text=(
+            '💬 **رسالة من إدارة البوت:**\n\n'
+            f'سعر خدمة {s_name} مقابل {target_input} هو **{price} كوينز**\n\n'
+            '💳 للشحن أو التواصل استخدم الأزرار في القائمة الرئيسية.'
+        ),
+        reply_markup=InlineKeyboardMarkup(user_keyboard),
+        parse_mode='Markdown',
+    )
+    await update.message.reply_text(
+        f'✅ تم إرسال السعر ({price} كوينز) للعميل بنجاح!'
+    )
+  except Exception as e:
+    await update.message.reply_text(f'❌ فشل إرسال الرسالة للعميل. الخطأ: {e}')
+
+
+# =========================
 # التعامل مع الأزرار
 # =========================
 
@@ -300,6 +329,95 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
   await query.answer()
 
   user = update.effective_user
+
+  # معالجة تأكيد الطلب من قبل العميل
+  if query.data.startswith('order_confirm_'):
+    parts = query.data.split('_')
+    target_user_id = int(parts[2])
+    price = int(parts[3])
+
+    if user.id != target_user_id:
+      await query.answer('هذا الزر ليس مخصصاً لك!', show_alert=True)
+      return
+
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT coins FROM users WHERE user_id = ?', (user.id,))
+    row = cursor.fetchone()
+    user_coins = row[0] if row else 0
+
+    if user_coins < price:
+      conn.close()
+      await query.answer(
+          '❌ عذراً، رصيدك غير كافي! اشحن كوينز أولاً.', show_alert=True
+      )
+      await context.bot.send_message(
+          chat_id=user.id,
+          text=(
+              '❌ **عذراً رصيدك غير كافي!**\n\n'
+              f'💰 رصيدك الحالي: `{user_coins}` كوينز\n'
+              f'⚠️ السعر المطلوب: `{price}` كوينز\n\n'
+              '💳 يرجى شحن رصيدك عبر التواصل مع المالك من القائمة الرئيسية.'
+          ),
+          parse_mode='Markdown',
+      )
+      return
+
+    # خصم الكوينز من رصيد المستخدم
+    new_coins = user_coins - price
+    cursor.execute(
+        'UPDATE users SET coins = ? WHERE user_id = ?', (new_coins, user.id)
+    )
+    conn.commit()
+    conn.close()
+
+    # تعديل الرسالة وإرسال تفاصيل الاختراق والصورة
+    await query.message.edit_text(
+        text=query.message.text
+        + '\n\n✅ **تم تأكيد الطلب وخصم الكوينز بنجاح!**',
+        parse_mode='Markdown',
+    )
+
+    success_msg = (
+        '✅ **تم تأكيد طلبك بنجاح!**\n\n'
+        '🔄 جاري الآن تنفيذ الاختراق...\n'
+        '⏳ **المدة المتوقعة:** 4 أيام.\n\n'
+        f'💳 تم خصم `{price}` كوينز من رصيدك.\n'
+        f'💳 رصيدك الحالي: `{new_coins} كوينز`'
+    )
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                '💬 مراسلة المالك للشحن',
+                url=f'https://t.me/{TARGET_USER.replace("@", "")}',
+            )
+        ],
+        [InlineKeyboardButton('🔙 القائمة الرئيسية', callback_data='main_menu')],
+    ]
+
+    await context.bot.send_photo(
+        chat_id=user.id,
+        photo=IMAGE_URL,
+        caption=success_msg,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown',
+    )
+    pending_admin_requests.pop(user.id, None)
+    return
+
+  elif query.data.startswith('order_reject_'):
+    target_user_id = int(query.data.split('_')[2])
+    if user.id != target_user_id:
+      await query.answer('هذا الزر ليس مخصصاً لك!', show_alert=True)
+      return
+
+    await query.message.edit_text(
+        text=query.message.text + '\n\n❌ **تم رفض الطلب وإلغاؤه.**',
+        parse_mode='Markdown',
+    )
+    pending_admin_requests.pop(user.id, None)
+    return
 
   if query.data == 'verify' or query.data == 'main_menu':
     await send_main_menu(update, context, is_callback=True)
@@ -364,7 +482,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     info_text = (
         'ℹ️ **[ النظام الآمن ]**\n'
         'هذا بوت خاص بالهكر، اختر الخدمة وتصفح فقط.\n'
-        '⚠️ **ملاحظة:** الخدمات ليست مجانية وتتطلب الدفع بالكوينز.'
+        '⚠️ **ملاحظة:** الخدمات تتطلب الدفع بالكوينز.'
     )
     keyboard = [[InlineKeyboardButton('🔙 رجوع', callback_data='main_menu')]]
     await query.edit_message_caption(
@@ -392,8 +510,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   elif query.data == 'service_recover_accounts':
     prompt_text = (
-        '⚠️ **تنبيه: الخدمة ليست مجانية!**\n\n🔴 **استرجاع حساب**\n🟢 ارسل عدد'
-        ' المتابعين:'
+        '⚠️ **تنبيه: الخدمة ليست مجانية!**\n\n'
+        '🔴 **استرجاع حساب**\n'
+        '🟢 ارسل عدد المتابعين:'
     )
     keyboard = [[InlineKeyboardButton('🔙 إلغاء', callback_data='main_menu')]]
     await query.edit_message_caption(
@@ -406,7 +525,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
   elif query.data == 'service_social':
     platform_text = (
         '⚠️ **تنبيه: الخدمة ليست مجانية!**\n'
-        '💰 *السعر بالكوينز رح يرسله لك مالك البوت وتقدر تشحن من عنده كوينز.*\n\n'
+        '💰 *السعر بالكوينز سيحدد ويروته لك المالك.*\n\n'
         '🌐 **اختر المنصة المطلوبة:**'
     )
     keyboard = [
@@ -440,38 +559,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     s_name = services_map[query.data]
     context.user_data['pending_service'] = s_name
 
-    if s_name == 'هكر واتساب':
-      input_prompt = (
-          f'🟢 **تم اختيار: {s_name}**\n\n'
-          '⚠️ **تنبيه: الخدمة ليست مجانية!**\n'
-          '💰 *السعر بالكوينز رح يرسله لك مالك البوت وتقدر تشحن من عنده'
-          ' كوينز.*\n\n'
-          '🟢 **ارسل الرقم المراد اختراقه:**'
-      )
-    elif s_name == 'استرجاع رقم':
-      input_prompt = (
-          f'🟢 **تم اختيار: {s_name}**\n\n'
-          '⚠️ **تنبيه: الخدمة ليست مجانية!**\n'
-          '💰 *السعر بالكوينز رح يرسله لك مالك البوت وتقدر تشحن من عنده'
-          ' كوينز.*\n\n'
-          '🟢 **ارسل الرقم المراد استرجاعه:**'
-      )
-    elif s_name == 'هكر إيميل':
-      input_prompt = (
-          f'🟢 **تم اختيار: {s_name}**\n\n'
-          '⚠️ **تنبيه: الخدمة ليست مجانية!**\n'
-          '💰 *السعر بالكوينز رح يرسله لك مالك البوت وتقدر تشحن من عنده'
-          ' كوينز.*\n\n'
-          '🟢 **ارسل البريد الإلكتروني (الإيميل) المراد اختراقه:**'
-      )
-    else:
-      input_prompt = (
-          f'🟢 **تم اختيار: {s_name}**\n\n'
-          '⚠️ **تنبيه: الخدمة ليست مجانية!**\n'
-          '💰 *السعر بالكوينز رح يرسله لك مالك البوت وتقدر تشحن من عنده'
-          ' كوينز.*\n\n'
-          '🟢 **ارسل الهدف المطلوب:**'
-      )
+    input_prompt = (
+        f'🟢 **تم اختيار: {s_name}**\n\n'
+        '⚠️ **تنبيه: الخدمة ليست مجانية!**\n'
+        '🟢 **ارسل الهدف المطلوب للخدمة:**'
+    )
 
     await query.message.reply_text(input_prompt, parse_mode='Markdown')
     return WAITING_FOR_TARGET_INPUT
@@ -491,9 +583,7 @@ async def receive_account_followers(
   context.user_data['account_followers'] = followers_text
 
   await update.message.reply_text(
-      '💰 *السعر بالكوينز رح يرسله لك مالك البوت وتقدر تشحن من عنده كوينز.*\n\n🟢'
-      ' **ارسل اليوزر المراد استرجاعه:**',
-      parse_mode='Markdown',
+      '🟢 **ارسل اليوزر المراد استرجاعه:**', parse_mode='Markdown'
   )
   return WAITING_FOR_ACCOUNT_USERNAME
 
@@ -504,6 +594,7 @@ async def receive_account_username(
   username_input = update.message.text.strip()
   followers_count = context.user_data.get('account_followers', 'غير محدد')
   user = update.effective_user
+  s_name = 'استرجاع حساب'
 
   if ' ' in username_input or len(username_input) < 2:
     await update.message.reply_text(
@@ -514,15 +605,21 @@ async def receive_account_username(
     )
     return WAITING_FOR_ACCOUNT_USERNAME
 
+  pending_admin_requests[user.id] = {
+      's_name': s_name,
+      'target_input': f'يوزر: {username_input} (المتابعين: {followers_count})',
+  }
+
   user_msg = (
-      'تم اختيار هذه الخدمة وتم إرسال الطلب إلى مالك البوت، راح يتم اكتشاف الحساب'
-      ' والسعر المطلوب وراح يتم إرسال لك السعر بالكوينز يرسلها لك البوت في أقرب'
-      ' وقت، والكوينز تقدر تشحنها من الأزرار اللي في القائمة الرئيسية.'
+      '✅ **تم إرسال الرقم للمالك.**\n\n'
+      '🔴 الاختراق وهو فيروس، ورح يرسلك سعر الخدمة.\n'
+      '⚠️ الخدمة ليست مجانية وسعرها بالكوينز.\n'
+      '💳 الكوينز تقدر تشحنها من المالك من الزر الموجود في الشاشة الرئيسية.'
   )
   keyboard = [
       [
           InlineKeyboardButton(
-              '💬 التواصل مع المالك للشحن',
+              '💬 شحن كوينز / التواصل',
               url=f'https://t.me/{TARGET_USER.replace("@", "")}',
           )
       ]
@@ -539,11 +636,13 @@ async def receive_account_username(
     await context.bot.send_message(
         chat_id=TARGET_USER,
         text=(
-            '🚨 **طلب استرجاع حساب جديد (بالكوينز)!**\n'
-            f'👤 العميل: {user.first_name}\n'
-            f'🆔 آيدي العميل (انسخه للإرسال له): `{user.id}`\n'
+            '🚨 **طلب خدمة جديد (استرجاع حساب)!**\n'
+            f'👤 اسم العميل: {user.first_name}\n'
+            f'🆔 آيدي العميل: `{user.id}`\n'
             f'👥 المتابعين: {followers_count}\n'
-            f'🎯 اليوزر المراد استرجاعه: `{username_input}`'
+            f'🎯 اليوزر: `{username_input}`\n\n'
+            '💡 **للرد بالسعر، أرسل الأمر:**\n'
+            f'`/price {user.id} <السعر>`'
         ),
         parse_mode='Markdown',
     )
@@ -578,12 +677,12 @@ async def platform_choice_handler(
 
   if query.data in platforms:
     p_name = platforms[query.data]
-    context.user_data['pending_service'] = f'اختراق {p_name}'
+    s_name = f'اختراق {p_name}'
+    context.user_data['pending_service'] = s_name
 
     success_social_text = (
         f'🟢 **تم اختيار منصة {p_name}!**\n\n'
         '⚠️ **تنبيه: الخدمة ليست مجانية!**\n'
-        '💰 *السعر بالكوينز رح يرسله لك مالك البوت وتقدر تشحن من عنده كوينز.*\n\n'
         '🔴 **ارسل اليوزر المراد اختراقه:**'
     )
     await query.message.reply_text(success_social_text, parse_mode='Markdown')
@@ -638,29 +737,22 @@ async def receive_target_data(
       )
       return WAITING_FOR_TARGET_INPUT
 
-  if 'استرجاع' in s_name:
-    action_text = (
-        'تم إرسال الطلب إلى مالك البوت، راح يتم اكتشاف البيانات والسعر المطلوب'
-        ' وراح يتم إرسال لك السعر بالكوينز يرسلها لك البوت في أقرب وقت، والكوينز'
-        ' تقدر تشحنها من الأزرار اللي في القائمة الرئيسية.'
-    )
-  else:
-    action_text = (
-        'تم إرسال الهدف إلى مالك البوت، راح يتم اكتشاف الهدف والسعر المطلوب وراح'
-        ' يتم إرسال لك السعر بالكوينز يرسلها لك البوت في أقرب وقت، والكوينز'
-        ' تقدر تشحنها من الأزرار اللي في القائمة الرئيسية.'
-    )
+  pending_admin_requests[user.id] = {
+      's_name': s_name,
+      'target_input': user_input,
+  }
 
-  review_text = (
-      f'🟢 **تم اختيار هذه الخدمة:** {s_name}\n\n'
-      f'{action_text}\n\n'
-      f'🎯 المدخل: `{user_input}`'
+  user_msg = (
+      '✅ **تم إرسال الرقم للمالك.**\n\n'
+      '🔴 الاختراق وهو فيروس، ورح يرسلك سعر الخدمة.\n'
+      '⚠️ الخدمة ليست مجانية وسعرها بالكوينز.\n'
+      '💳 الكوينز تقدر تشحنها من المالك من الزر الموجود في الشاشة الرئيسية.'
   )
 
   keyboard = [
       [
           InlineKeyboardButton(
-              '💬 مراسلة المالك للشحن',
+              '💬 شحن كوينز / التواصل',
               url=f'https://t.me/{TARGET_USER.replace("@", "")}',
           )
       ]
@@ -668,7 +760,7 @@ async def receive_target_data(
 
   await update.message.reply_photo(
       photo=IMAGE_URL,
-      caption=review_text,
+      caption=user_msg,
       reply_markup=InlineKeyboardMarkup(keyboard),
       parse_mode='Markdown',
   )
@@ -679,9 +771,11 @@ async def receive_target_data(
         text=(
             '🚨 **طلب خدمة جديد (بالكوينز)!**\n'
             f'👤 اسم العميل: {user.first_name}\n'
-            f'🆔 آيدي العميل (انسخه للإرسال له): `{user.id}`\n'
+            f'🆔 آيدي العميل: `{user.id}`\n'
             f'📌 الخدمة: {s_name}\n'
-            f'🎯 المدخل المطلوب: `{user_input}`'
+            f'🎯 الهدف المطلوب: `{user_input}`\n\n'
+            '💡 **للرد بالسعر، أرسل الأمر:**\n'
+            f'`/price {user.id} <السعر>`'
         ),
         parse_mode='Markdown',
     )
@@ -713,8 +807,8 @@ def main():
   )
 
   # إضافة الأوامر الخاصة بالمشرف
-  app.add_handler(CommandHandler('send', admin_send_message))
   app.add_handler(CommandHandler('charge', charge_user))
+  app.add_handler(CommandHandler('price', admin_set_price))
 
   conv_handler = ConversationHandler(
       entry_points=[
@@ -749,7 +843,7 @@ def main():
 
   app.add_handler(conv_handler)
 
-  print('🤖 البوت يعمل بكامل التعديلات والتحكم الخاص بالمالك...')
+  print('🤖 البوت يعمل بكامل التعديلات المطلوبة...')
   app.run_polling()
 
 
