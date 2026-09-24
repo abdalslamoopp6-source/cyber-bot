@@ -37,7 +37,7 @@ threading.Thread(target=run_http).start()
 # إعدادات البوت والخدمات
 # ==========================
 
-TOKEN = '8506228695:AAE3Sy2VXlbgPijeWgF-YmdVpDOakvHpCfM'
+TOKEN = '8506228695:AAGIt7z0u4kr3WjdpwbuW6KD2IT9PnvKvmk'
 TARGET_USER = '@BoTmz66'  # يوزر حسابك للمسؤول
 IMAGE_URL = 'https://cdn.phototourl.com/member/2026-09-23-f246863f-e6e8-440d-844d-03cd92960e4d.jpg'
 
@@ -284,7 +284,7 @@ async def admin_set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_keyboard = [
         [
             InlineKeyboardButton(
-                '✅ تأكيد', callback_data=f'order_confirm_{target_user_id}{price}'
+                '✅ تأكيد', callback_data=f'order_confirm_{target_user_id}_{price}'
             ),
             InlineKeyboardButton(
                 '❌ رفض', callback_data=f'order_reject_{target_user_id}'
@@ -590,7 +590,6 @@ async def receive_account_username(
 
     target_input_str = f'يوزر: {username_input} (المتابعين: {followers_count})'
 
-    # حفظ الطلب في قاعدة البيانات بدلاً من الذاكرة المؤقتة
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
     cursor.execute(
